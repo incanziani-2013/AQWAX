@@ -1,0 +1,62 @@
+name: Build AQWAX VST3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout AQWAX
+        uses: actions/checkout@v4
+
+      - name: Download JUCE
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE.git JUCE
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S . -B build `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DJUCE_DIR="${{ github.workspace }}\JUCE"
+
+      - name: Build AQWAX
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Find AQWAX VST3
+        shell: pwsh
+        run: |
+          $plugin = Get-ChildItem -Path . -Filter "AQWAX.vst3" -Recurse -Directory |
+            Where-Object { $_.FullName -notmatch "\\JUCE\\" } |
+            Select-Object -First 1
+
+          if (-not $plugin) {
+            Write-Host "AQWAX.vst3 was not found."
+            exit 1
+          }
+
+          Write-Host "Found: $($plugin.FullName)"
+          "PLUGIN_PATH=$($plugin.FullName)" >> $env:GITHUB_ENV
+
+      - name: Package AQWAX
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release
+          Copy-Item "$env:PLUGIN_PATH" "release\AQWAX.vst3" -Recurse
+          Compress-Archive `
+            -Path "release\AQWAX.vst3" `
+            -DestinationPath "AQWAX-v1.0-Windows-VST3.zip"
+
+      - name: Upload AQWAX VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: AQWAX-v1.0-Windows-VST3
+          path: AQWAX-v1.0-Windows-VST3.zip
