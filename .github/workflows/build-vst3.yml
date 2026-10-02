@@ -2,8 +2,6 @@ name: Build AQWAX VST3
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   build-windows:
@@ -13,49 +11,81 @@ jobs:
       - name: Checkout AQWAX
         uses: actions/checkout@v4
 
-      - name: Download JUCE
+      - name: Install JUCE
         shell: pwsh
         run: |
-          git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE.git JUCE
+          git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE.git "$env:GITHUB_WORKSPACE\JUCE"
+
+      - name: Check project
+        shell: pwsh
+        run: |
+          Write-Host "=== PROJECT ==="
+          Get-ChildItem "$env:GITHUB_WORKSPACE"
+
+          Write-Host "=== CMAKE ==="
+          Get-Item "$env:GITHUB_WORKSPACE\CMakeLists.txt"
+
+          Write-Host "=== JUCE ==="
+          Get-Item "$env:GITHUB_WORKSPACE\JUCE\CMakeLists.txt"
+
+          Write-Host "=== SOURCE ==="
+          Get-ChildItem "$env:GITHUB_WORKSPACE\Source"
 
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -S . -B build `
+          cmake `
+            -S "$env:GITHUB_WORKSPACE" `
+            -B "$env:GITHUB_WORKSPACE\build" `
             -G "Visual Studio 17 2022" `
             -A x64 `
-            -DJUCE_DIR="${{ github.workspace }}\JUCE"
+            -DJUCE_DIR="$env:GITHUB_WORKSPACE\JUCE"
 
       - name: Build AQWAX
         shell: pwsh
         run: |
-          cmake --build build --config Release --parallel
+          cmake `
+            --build "$env:GITHUB_WORKSPACE\build" `
+            --config Release `
+            --parallel
 
       - name: Find AQWAX VST3
         shell: pwsh
         run: |
-          $plugin = Get-ChildItem -Path . -Filter "AQWAX.vst3" -Recurse -Directory |
-            Where-Object { $_.FullName -notmatch "\\JUCE\\" } |
+          $plugin = Get-ChildItem `
+            "$env:GITHUB_WORKSPACE\build" `
+            -Filter "AQWAX.vst3" `
+            -Recurse `
+            -Directory |
             Select-Object -First 1
 
           if (-not $plugin) {
-            Write-Host "AQWAX.vst3 was not found."
+            Write-Host "AQWAX.vst3 not found."
+            Get-ChildItem "$env:GITHUB_WORKSPACE\build" -Recurse
             exit 1
           }
 
-          Write-Host "Found: $($plugin.FullName)"
-          "PLUGIN_PATH=$($plugin.FullName)" >> $env:GITHUB_ENV
+          Write-Host "Found:"
+          Write-Host $plugin.FullName
 
-      - name: Package AQWAX
+          New-Item -ItemType Directory `
+            -Force `
+            -Path "$env:GITHUB_WORKSPACE\release"
+
+          Copy-Item `
+            $plugin.FullName `
+            "$env:GITHUB_WORKSPACE\release\AQWAX.vst3" `
+            -Recurse
+
+      - name: Package VST3
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release
-          Copy-Item "$env:PLUGIN_PATH" "release\AQWAX.vst3" -Recurse
           Compress-Archive `
-            -Path "release\AQWAX.vst3" `
-            -DestinationPath "AQWAX-v1.0-Windows-VST3.zip"
+            -Path "$env:GITHUB_WORKSPACE\release\AQWAX.vst3" `
+            -DestinationPath "$env:GITHUB_WORKSPACE\AQWAX-v1.0-Windows-VST3.zip" `
+            -Force
 
-      - name: Upload AQWAX VST3
+      - name: Upload VST3
         uses: actions/upload-artifact@v4
         with:
           name: AQWAX-v1.0-Windows-VST3
